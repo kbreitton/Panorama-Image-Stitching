@@ -1,0 +1,208 @@
+function img_mosaic = mymosaic(img_input)
+
+%resize all images for robustness
+imageSize = [size(img_input{1}, 1) size(img_input{1}, 2)];
+for i = 2:length(img_input)
+    img_input{i} = imresize(img_input{i}, imageSize);
+end
+
+
+tforms(length(img_input)) = projective2d(eye(3)); %initialize tform
+
+%initialize image I1
+I1 = rgb2gray(img_input{1});
+
+%% first, get tforms of each stich iteration
+for i = 2:numel(img_input)
+       
+%get image I2, the next image to stitch
+I2 = rgb2gray(img_input{i});
+
+%corner detection
+cimg1 = cornermetric(I1);
+cimg2 = cornermetric(I2);
+
+%adaptive non maximum suppression
+[y1 x1 rmax1] = anms(cimg1, 200);
+[y2 x2 rmax2] = anms(cimg2, 200);
+
+%feature descriptions
+p1 = feat_desc(I1, y1, x1);
+p2 = feat_desc(I2, y2, x2);
+
+%feature matching
+m = feat_match(p1, p2);
+
+counts = sum(m ~= -1);
+
+%reduce pts to those that matched according to feat_match
+x1_match = x1(m ~= -1);
+y1_match = y1(m ~= -1);
+y2_match = y2(m(m~= -1));
+x2_match = x2(m(m~= -1));
+
+if numel(x1_match) <= 4
+    inlier_ind{i} = 1:numel(x1_match);
+    H = est_homography(x2_match, y2_match, x1_match, y1_match);
+else
+
+%RANSAC
+[H, inlier_ind{i}] = ransac_est_homography(y2_match, x2_match, y1_match, x1_match, 5);
+end
+
+%% demonstrative plots
+
+%plot non-anms'd corner detection
+nonanms_plot1 = img_input{i-1};
+nonanms_plot2 = img_input{i};
+
+r1 = nonanms_plot1(:,:,1);
+g1 = nonanms_plot1(:,:,2);
+b1 = nonanms_plot1(:,:,2);
+
+r2 = nonanms_plot2(:,:,1);
+g2 = nonanms_plot2(:,:,2);
+b2 = nonanms_plot2(:,:,2);
+
+pass1 = find(cimg1 > .00005);
+pass2 = find(cimg2 > .00005);
+
+r1(pass1) = 255;
+g1(pass1) = 0;
+b1(pass1) = 0;
+
+r2(pass2) = 255;
+g2(pass2) = 0;
+b2(pass2) = 0;
+
+nonanms_plot1(:,:,1) = r1;
+nonanms_plot1(:,:,2) = g1;
+nonanms_plot1(:,:,2) = b1;
+nonanms_plot2(:,:,1) = r2;
+nonanms_plot2(:,:,2) = g2;
+nonanms_plot2(:,:,2) = b2;
+
+figure(1), imshow(nonanms_plot1), figure(2), imshow(nonanms_plot2);
+
+%plot anms
+anms_plot1 = img_input{i-1};
+anms_plot2 = img_input{i};
+
+for p = 1:numel(x1)
+anms_plot1(y1(p)-3:y1(p)+3, x1(p)-3:x1(p)+3, 1) = 255;
+anms_plot2(y2(p)-3:y2(p)+3, x2(p)-3:x2(p)+3, 1) = 255;
+
+anms_plot1(y1(p)-3:y1(p)+3, x1(p)-3:x1(p)+3, 2) = 0;
+anms_plot2(y2(p)-3:y2(p)+3, x2(p)-3:x2(p)+3, 2) = 0;
+
+anms_plot1(y1(p)-3:y1(p)+5, x1(p)-3:x1(p)+3, 3) = 0;
+anms_plot2(y2(p)-3:y2(p)+3, x2(p)-3:x2(p)+3, 3) = 0;
+end
+
+figure(1), imshow(anms_plot1), figure(2), imshow(anms_plot2);
+
+%plot matched points blue and rest red
+anms_plot1 = img_input{i-1};
+anms_plot2 = img_input{i};
+
+for p = 1:numel(x1_match)
+anms_plot1(y1_match(p)-3:y1_match(p)+3, x1_match(p)-3:x1_match(p)+3, 1) = 0;
+anms_plot2(y2_match(p)-3:y2_match(p)+3, x2_match(p)-3:x2_match(p)+3, 1) = 0;
+
+anms_plot1(y1_match(p)-3:y1_match(p)+3, x1_match(p)-3:x1_match(p)+3, 2) = 0;
+anms_plot2(y2_match(p)-3:y2_match(p)+3, x2_match(p)-3:x2_match(p)+3, 2) = 0;
+
+anms_plot1(y1_match(p)-3:y1_match(p)+5, x1_match(p)-3:x1_match(p)+3, 3) = 255;
+anms_plot2(y2_match(p)-3:y2_match(p)+3, x2_match(p)-3:x2_match(p)+3, 3) = 255;
+end
+
+figure(1), imshow(anms_plot1), figure(2), imshow(anms_plot2);
+
+%plot matched patches, of actual patches
+blah = img_input{i-1};
+foo = img_input{i};
+
+blah = padarray(blah, [20 20]);
+foo = padarray(foo, [20 20]);
+
+whaa = linspace(0,255,numel(inlier_ind{i}));
+no = linspace(255, 0, numel(inlier_ind{i}));
+ for k = 1:numel(inlier_ind{i})
+blah(y1_match(inlier_ind{i}(k)):y1_match(inlier_ind{i}(k))+39, x1_match(inlier_ind{i}(k)):x1_match(inlier_ind{i}(k))+39,1) = whaa(k);
+blah(y1_match(inlier_ind{i}(k)):y1_match(inlier_ind{i}(k))+39, x1_match(inlier_ind{i}(k)):x1_match(inlier_ind{i}(k))+39,2) = no(k);
+
+foo(y2_match(inlier_ind{i}(k)):y2_match(inlier_ind{i}(k))+39, x2_match(inlier_ind{i}(k)):x2_match(inlier_ind{i}(k))+39,1) = whaa(k);
+foo(y2_match(inlier_ind{i}(k)):y2_match(inlier_ind{i}(k))+39, x2_match(inlier_ind{i}(k)):x2_match(inlier_ind{i}(k))+39,2) = no(k);
+
+ end
+
+figure(1), imshow(blah), figure(2), imshow(foo)
+
+%% back to calculations
+
+%get cumulative tform
+next_tform = projective2d(H');
+tforms(i).T = tforms(i-1).T * next_tform.T;
+
+%set new I1
+I1 = I2;
+
+end
+
+%% find the center of the transforms(order of img_input is known) and reorder tforms
+centerIdx = floor((numel(tforms)+1)/2);
+
+Tinv = invert(tforms(centerIdx));
+
+for i = 1:numel(tforms)
+    tforms(i).T = Tinv.T * tforms(i).T;
+end
+
+%% intialize the img_mosaic
+for i = 1:numel(tforms)
+    [xlim(i,:), ylim(i,:)] = outputLimits(tforms(i), [1 imageSize(2)], [1 imageSize(1)]);
+end
+
+% Find the minimum and maximum output limits
+xMin = min([1; xlim(:)]);
+xMax = max([imageSize(2); xlim(:)]);
+
+yMin = min([1; ylim(:)]);
+yMax = max([imageSize(1); ylim(:)]);
+
+% Width and height of img_mosaic.
+width  = round(xMax - xMin);
+height = round(yMax - yMin);
+
+% Initialize the "empty" img_mosaic.
+img_mosaic = zeros([height width 3], 'like', I1);
+
+
+%% stich img_mosaic with transformed images
+
+blender = vision.AlphaBlender('Operation', 'Binary mask', ...
+    'MaskSource', 'Input port');
+
+xLimits = [xMin xMax];
+yLimits = [yMin yMax];
+img_mosaicView = imref2d([height width], xLimits, yLimits);
+
+% Create the img_mosaic.
+for i = 1:numel(img_input)
+
+    I = img_input{i};
+
+    % Transform I into the img_mosaic.
+    warpedImage = imwarp(I, tforms(i), 'OutputView', img_mosaicView);
+
+    % Create an mask for the overlay operation.
+    warpedMask = imwarp(ones(size(I(:,:,1))), tforms(i), 'OutputView', img_mosaicView);
+
+    % Clean up edge artifacts in the mask and convert to a binary image.
+    warpedMask = warpedMask >= 1;
+
+    % Overlay the warpedImage onto the img_mosaic.
+    img_mosaic = step(blender, img_mosaic, warpedImage, warpedMask);
+end
+
+end

@@ -1,0 +1,64 @@
+function [H, inlier_ind] = ransac_est_homography(y1,x1,y2,x2,thres)
+
+% I1 = padarray(I1, [20 20], 'replicate');
+% I2 = padarray(I2, [20 20], 'replicate');
+
+i = 1; %a counter
+
+while 1
+    
+    %choose 4 random elements that are not in a line
+    while 1
+        blah = randperm(numel(y1));
+        elements = blah(1:4);
+        
+        %testing if elements are in a line
+        p = polyfit(x1(elements), y1(elements), 1);
+        yfit = polyval(p, x1(elements));
+        yresid = y1(elements) - yfit;
+        SSresid = sum(yresid.^2);
+        SStotal = (length(y1(elements))-1) * var(y1(elements));
+        rsq = 1 - SSresid/SStotal;
+        
+        if rsq < .9 %if not in a line, continue
+            break
+        end
+    end
+    
+% for k = 1:4
+%    patch1{k} = I1(y1(elements(k)):y1(elements(k))+39, x1(elements(k)):x1(elements(k))+39); 
+%    patch2{k} = I2(y2(elements(k)):y2(elements(k))+39, x2(elements(k)):x2(elements(k))+39);
+%    
+%    figure(k)
+%    subplot(1,2,1), imshow(patch1{k}), subplot(1,2,2), imshow(patch2{k})
+% end
+
+    %calculate transformation based on 4 elements
+    H = est_homography(x2(elements), y2(elements), x1(elements), y1(elements));
+    
+    %apply transformation and count # points matching up
+    [X Y] = apply_homography(H, x1, y1);
+    
+    distances = sqrt(sum(([X Y]' - [x2 y2]').^2))';
+    votes(:,i) = distances < thres; %n1' x (k iterations) record of which points voted for the i,...,k transform
+    
+    scores(i) = sum(distances);
+    
+%     if counts(i) == 4
+%         blah = 0;
+%     end
+    
+    if i == 500 %break after most combinations were probably tried
+        break
+    end
+    
+    i = i + 1; %increment counter
+end
+
+[maxi index] = max(counts);
+
+H = est_homography(x2(votes(:,index)), y2(votes(:,index)), x1(votes(:,index)), y1(votes(:,index)));%re-estimate homography
+inlier_ind = votes(:,index) ~= 0; %0's and 1's
+vector = 1:numel(inlier_ind);
+inlier_ind = vector(inlier_ind)';
+end
